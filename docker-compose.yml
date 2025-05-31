@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  meet-slack-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: meet-slack-bot
+    restart: unless-stopped
+    ports:
+      - "9001:9001"
+    environment:
+      # Slack Configuration
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET}
+      
+      # Google OAuth2 Configuration
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI}
+      
+      # Database Configuration
+      DATABASE_URL: sqlite:/app/data/app.db
+      
+      # Server Configuration
+      PORT: 9001
+      
+      # Logging
+      RUST_LOG: info
+    volumes:
+      # Persist SQLite database using named volume
+      - bot-data:/app/data
+      # Mount migrations for SQLx
+      - ./migrations:/app/migrations
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - slack-bot-network
+
+networks:
+  slack-bot-network:
+    driver: bridge
+
+volumes:
+  # Named volume for database persistence
+  bot-data:
+    driver: local

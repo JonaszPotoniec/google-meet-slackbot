@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  meet-slack-bot:
+    restart: always
+    environment:
+      RUST_LOG: warn
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+    volumes:
+      - bot-data:/app/data
+      - ./migrations:/app/migrations:ro
+
+volumes:
+  bot-data:
+    driver: local

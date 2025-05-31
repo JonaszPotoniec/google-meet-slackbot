@@ -1,0 +1,20 @@
+version: '3.8'
+
+# Development override file
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  meet-slack-bot:
+    build:
+      target: builder  # Use builder stage for development
+    environment:
+      RUST_LOG: debug
+    volumes:
+      # Mount source code for development
+      - ./src:/app/src:ro
+      - ./Cargo.toml:/app/Cargo.toml:ro
+      - ./Cargo.lock:/app/Cargo.lock:ro
+    ports:
+      - "9001:9001"
+      - "9229:9229"  # Debug port
+    command: ["cargo", "run"]

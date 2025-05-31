@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!\", slack_user_id, slack_team_id, created_at as \"created_at!: NaiveDateTime\", updated_at as \"updated_at!: NaiveDateTime\" FROM users WHERE slack_user_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Int64"
+      },
+      {
+        "name": "slack_user_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "slack_team_id",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!: NaiveDateTime",
+        "ordinal": 3,
+        "type_info": "Datetime"
+      },
+      {
+        "name": "updated_at!: NaiveDateTime",
+        "ordinal": 4,
+        "type_info": "Datetime"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "987c494a3874abba4ed34123329b681e265342a5e5fb78ff78895c1fb91f043d"
+}

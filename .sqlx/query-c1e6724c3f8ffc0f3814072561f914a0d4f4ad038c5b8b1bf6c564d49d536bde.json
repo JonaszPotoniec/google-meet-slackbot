@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO users (slack_user_id, slack_team_id)\n            VALUES (?1, ?2)\n            ON CONFLICT(slack_user_id) DO UPDATE SET\n                slack_team_id = excluded.slack_team_id,\n                updated_at = CURRENT_TIMESTAMP\n            RETURNING id, slack_user_id, slack_team_id, created_at as \"created_at!: NaiveDateTime\", updated_at as \"updated_at!: NaiveDateTime\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Int64"
+      },
+      {
+        "name": "slack_user_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "slack_team_id",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!: NaiveDateTime",
+        "ordinal": 3,
+        "type_info": "Datetime"
+      },
+      {
+        "name": "updated_at!: NaiveDateTime",
+        "ordinal": 4,
+        "type_info": "Datetime"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "c1e6724c3f8ffc0f3814072561f914a0d4f4ad038c5b8b1bf6c564d49d536bde"
+}
