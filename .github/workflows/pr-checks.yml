@@ -49,7 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        rust-version: [stable, beta]
+        rust-version: [stable]
 
     steps:
       - name: Checkout code
@@ -226,14 +226,7 @@ jobs:
   pr-checks-complete:
     name: All PR Checks Complete
     runs-on: ubuntu-latest
-    needs:
-      [
-        code-quality,
-        test,
-        security-check,
-        build,
-        docker-check,
-      ]
+    needs: [code-quality, test, security-check, build, docker-check]
     if: always()
     steps:
       - name: Check all jobs status

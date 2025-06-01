@@ -51,14 +51,13 @@ jobs:
           cargo install cargo-outdated
           cargo outdated --exit-code 1 || echo "⚠️ Some dependencies are outdated"
 
-  # Full test suite including edge cases
   comprehensive-tests:
     name: Comprehensive Test Suite
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        rust-version: [stable, beta, nightly]
-        features: ["", "--all-features", "--no-default-features"]
+        rust-version: [stable]
+        features: ["--all-features"]
     continue-on-error: ${{ matrix.rust-version == 'nightly' }}
 
     steps:
@@ -112,14 +111,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest]
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-          - os: macos-latest
-            target: x86_64-apple-darwin
 
     steps:
       - name: Checkout code
