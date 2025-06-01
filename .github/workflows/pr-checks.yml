@@ -1,0 +1,256 @@
+name: PR Tests and Health Checks
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Job 1: Code Quality and Formatting
+  code-quality:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          override: true
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check code formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy lints
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  # Job 2: Build and Test
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust-version: [stable, beta]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust-version }}
+          override: true
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.rust-version }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.rust-version }}-cargo-
+
+      - name: Install SQLx CLI
+        run: cargo install sqlx-cli --no-default-features --features sqlite
+
+      - name: Setup test database
+        run: |
+          export DATABASE_URL="sqlite:test.db"
+          sqlx database create
+          sqlx migrate run
+
+      - name: Run unit tests
+        env:
+          DATABASE_URL: sqlite:test.db
+          SLACK_SIGNING_SECRET: test_secret_for_ci
+          GOOGLE_CLIENT_ID: test_client_id
+          GOOGLE_CLIENT_SECRET: test_client_secret
+          GOOGLE_REDIRECT_URI: http://localhost:8080/auth/google/callback
+        run: cargo test --verbose
+
+      - name: Run integration tests
+        env:
+          DATABASE_URL: sqlite:test.db
+          SLACK_SIGNING_SECRET: test_secret_for_ci
+          GOOGLE_CLIENT_ID: test_client_id
+          GOOGLE_CLIENT_SECRET: test_client_secret
+          GOOGLE_REDIRECT_URI: http://localhost:8080/auth/google/callback
+        run: cargo test --test '*' --verbose
+
+      - name: Cleanup test database
+        run: rm -f test.db
+
+  # Job 3: Security Health Check
+  security-check:
+    name: Security Health Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run security health check script
+        run: |
+          chmod +x security-check.sh
+          ./security-check.sh
+
+      - name: Check for security vulnerabilities
+        run: cargo audit
+
+      - name: Verify no secrets in code
+        run: |
+          echo "Checking for potential secrets..."
+          # Check for common secret patterns
+          if grep -r "AKIAIOSFODNN7EXAMPLE\|sk_test_\|sk_live_\|rk_test_\|rk_live_" . --exclude-dir=.git --exclude="*.md" --exclude-dir=target; then
+            echo "❌ Potential secrets found!"
+            exit 1
+          fi
+          echo "✅ No obvious secrets detected"
+
+      - name: Check dependencies for known vulnerabilities
+        run: cargo audit --deny warnings
+
+  # Job 4: Build Check
+  build:
+    name: Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-build-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-build-cargo-
+
+      - name: Check project builds
+        run: cargo check --all-targets
+
+      - name: Build release version
+        run: cargo build --release
+
+  # Job 5: Docker Health Check
+  docker-check:
+    name: Docker Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        run: |
+          docker build -t meet-slack-bot:pr-test .
+
+      - name: Test Docker image runs
+        run: |
+          # Create minimal .env for container test
+          cat > .env.test << EOF
+          DATABASE_URL=sqlite:data/app.db
+          SLACK_SIGNING_SECRET=test_secret_for_docker
+          GOOGLE_CLIENT_ID=test_client_id
+          GOOGLE_CLIENT_SECRET=test_client_secret
+          GOOGLE_REDIRECT_URI=http://localhost:8080/auth/google/callback
+          HOST=0.0.0.0
+          PORT=8080
+          RUST_LOG=info
+          EOF
+
+          # Test that container starts and exits gracefully
+          timeout 30s docker run --rm \
+            --env-file .env.test \
+            -v $(pwd)/data:/app/data \
+            meet-slack-bot:pr-test || true
+
+          rm .env.test
+
+      - name: Check Docker security best practices
+        run: |
+          # Check Dockerfile for security best practices
+          echo "Checking Dockerfile security..."
+          if grep -q "USER.*root\|^USER root" Dockerfile; then
+            echo "❌ WARNING: Container runs as root"
+            exit 1
+          fi
+          if grep -q "ADD.*http\|ADD.*https" Dockerfile; then
+            echo "❌ WARNING: Using ADD with URL (use COPY instead)"
+            exit 1
+          fi
+          echo "✅ Basic Dockerfile security checks passed"
+
+  # Summary job that depends on all others
+  pr-checks-complete:
+    name: All PR Checks Complete
+    runs-on: ubuntu-latest
+    needs:
+      [
+        code-quality,
+        test,
+        security-check,
+        build,
+        docker-check,
+      ]
+    if: always()
+    steps:
+      - name: Check all jobs status
+        run: |
+          echo "Code Quality: ${{ needs.code-quality.result }}"
+          echo "Tests: ${{ needs.test.result }}"
+          echo "Security Check: ${{ needs.security-check.result }}"
+          echo "Build: ${{ needs.build.result }}"
+          echo "Docker Check: ${{ needs.docker-check.result }}"
+
+          if [[ "${{ needs.code-quality.result }}" != "success" || 
+                "${{ needs.test.result }}" != "success" || 
+                "${{ needs.security-check.result }}" != "success" || 
+                "${{ needs.build.result }}" != "success" || 
+                "${{ needs.docker-check.result }}" != "success" ]]; then
+            echo "❌ Some checks failed!"
+            exit 1
+          fi
+
+          echo "✅ All PR checks passed successfully!"

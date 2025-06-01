@@ -1,0 +1,125 @@
+name: Dependency Update Check
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+jobs:
+  check-dependencies:
+    name: Check for Dependency Updates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Install cargo tools
+        run: |
+          cargo install cargo-outdated
+          cargo install cargo-audit
+
+      - name: Check for outdated dependencies
+        run: |
+          echo "🔍 Checking for outdated dependencies..."
+          cargo outdated --format json > outdated.json
+
+          if [ -s outdated.json ] && [ "$(cat outdated.json)" != "[]" ]; then
+            echo "📦 Outdated dependencies found:"
+            cargo outdated
+            echo "Consider updating dependencies with: cargo update"
+          else
+            echo "✅ All dependencies are up to date"
+          fi
+
+      - name: Security audit
+        run: |
+          echo "🔒 Running security audit..."
+          cargo audit --format json > audit.json
+
+          if grep -q '"vulnerabilities":\[' audit.json; then
+            echo "⚠️ Security vulnerabilities found:"
+            cargo audit
+            echo "::warning::Security vulnerabilities detected in dependencies"
+          else
+            echo "✅ No security vulnerabilities found"
+          fi
+
+      - name: Upload audit results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: dependency-audit-results
+          path: |
+            outdated.json
+            audit.json
+          retention-days: 30
+
+  create-update-pr:
+    name: Create Dependency Update PR
+    runs-on: ubuntu-latest
+    needs: check-dependencies
+    if: github.event_name == 'schedule' # Only auto-create PRs on scheduled runs
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Update dependencies
+        run: |
+          # Update Cargo.lock with latest compatible versions
+          cargo update
+
+          # Check if anything was updated
+          if git diff --quiet Cargo.lock; then
+            echo "No dependency updates available"
+            echo "CREATE_PR=false" >> $GITHUB_ENV
+          else
+            echo "Dependencies were updated"
+            echo "CREATE_PR=true" >> $GITHUB_ENV
+          fi
+
+      - name: Create Pull Request
+        if: env.CREATE_PR == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: update dependencies"
+          title: "🔄 Automated dependency updates"
+          body: |
+            ## Automated Dependency Updates
+
+            This PR updates dependencies to their latest compatible versions.
+
+            ### Changes
+            - Updated `Cargo.lock` with latest dependency versions
+
+            ### Security
+            - All updates maintain compatibility with current version constraints
+            - Security audit will be run automatically on this PR
+
+            ### Review Checklist
+            - [ ] Check that all tests pass
+            - [ ] Verify no breaking changes in dependencies
+            - [ ] Review security audit results
+            - [ ] Test the application functionality
+
+            ---
+            *This PR was created automatically by the dependency update workflow.*
+          branch: automated/dependency-updates
+          delete-branch: true
+          labels: |
+            dependencies
+            automated

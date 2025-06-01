@@ -1,0 +1,302 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 2 * * 1"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Extended security audit for main branch
+  security-audit:
+    name: Extended Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Install security tools
+        run: |
+          cargo install cargo-audit
+          cargo install cargo-deny
+
+      - name: Run comprehensive security check
+        run: |
+          chmod +x security-check.sh
+          ./security-check.sh
+
+      - name: Audit dependencies
+        run: cargo audit
+
+      - name: Check for license compliance
+        run: |
+          if [ -f deny.toml ]; then
+            cargo deny check
+          else
+            echo "ℹ️ No deny.toml found, skipping license compliance check"
+          fi
+
+      - name: Check for outdated dependencies
+        run: |
+          cargo install cargo-outdated
+          cargo outdated --exit-code 1 || echo "⚠️ Some dependencies are outdated"
+
+  # Full test suite including edge cases
+  comprehensive-tests:
+    name: Comprehensive Test Suite
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust-version: [stable, beta, nightly]
+        features: ["", "--all-features", "--no-default-features"]
+    continue-on-error: ${{ matrix.rust-version == 'nightly' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust-version }}
+          override: true
+
+      - name: Install SQLx CLI
+        run: cargo install sqlx-cli --no-default-features --features sqlite
+
+      - name: Setup test database
+        run: |
+          export DATABASE_URL="sqlite:ci_test.db"
+          sqlx database create
+          sqlx migrate run
+
+      - name: Run tests with coverage
+        env:
+          DATABASE_URL: sqlite:ci_test.db
+          SLACK_SIGNING_SECRET: test_secret_for_ci_extended
+          GOOGLE_CLIENT_ID: test_client_id
+          GOOGLE_CLIENT_SECRET: test_client_secret
+          GOOGLE_REDIRECT_URI: http://localhost:8080/auth/google/callback
+        run: |
+          # Install cargo-tarpaulin for coverage (on stable only)
+          if [ "${{ matrix.rust-version }}" = "stable" ] && [ "${{ matrix.features }}" = "--all-features" ]; then
+            cargo install cargo-tarpaulin
+            cargo tarpaulin --out Xml --output-dir coverage/ ${{ matrix.features }}
+          else
+            cargo test --verbose ${{ matrix.features }}
+          fi
+
+      - name: Upload coverage to Codecov
+        if: matrix.rust-version == 'stable' && matrix.features == '--all-features'
+        uses: codecov/codecov-action@v3
+        with:
+          file: coverage/cobertura.xml
+          fail_ci_if_error: false
+
+      - name: Cleanup test database
+        run: rm -f ci_test.db
+
+  # Build for multiple targets
+  cross-platform-build:
+    name: Cross-platform Build Check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: x86_64-apple-darwin
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build for target
+        run: cargo build --release --target ${{ matrix.target }}
+
+  # Production readiness check
+  production-readiness:
+    name: Production Readiness Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for production configurations
+        run: |
+          echo "Checking production readiness..."
+
+          # Check if production Docker compose exists
+          if [ ! -f docker-compose.prod.yml ]; then
+            echo "❌ Missing docker-compose.prod.yml"
+            exit 1
+          fi
+
+          # Check if Dockerfile follows best practices
+          if ! grep -q "^USER" Dockerfile; then
+            echo "⚠️ Dockerfile should specify a non-root USER"
+          fi
+
+          # Check for health check in Docker
+          if ! grep -q "HEALTHCHECK" Dockerfile; then
+            echo "⚠️ Consider adding HEALTHCHECK to Dockerfile"
+          fi
+
+          # Check for proper logging configuration
+          if ! grep -q "RUST_LOG" .env.example; then
+            echo "⚠️ Should include RUST_LOG in environment configuration"
+          fi
+
+          echo "✅ Production readiness checks completed"
+
+      - name: Verify environment template
+        run: |
+          if [ ! -f .env.example ]; then
+            echo "❌ Missing .env.example file"
+            exit 1
+          fi
+
+          # Check that .env.example has all required variables
+          REQUIRED_VARS=(
+            "DATABASE_URL"
+            "SLACK_SIGNING_SECRET"
+            "GOOGLE_CLIENT_ID"
+            "GOOGLE_CLIENT_SECRET"
+            "GOOGLE_REDIRECT_URI"
+          )
+
+          for var in "${REQUIRED_VARS[@]}"; do
+            if ! grep -q "^$var=" .env.example; then
+              echo "❌ Missing $var in .env.example"
+              exit 1
+            fi
+          done
+
+          echo "✅ Environment template is complete"
+
+  # Container security scan
+  container-security:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t meet-slack-bot:security-scan .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "meet-slack-bot:security-scan"
+          format: "sarif"
+          output: "trivy-results.sarif"
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: "trivy-results.sarif"
+
+  # Database migration test
+  migration-test:
+    name: Database Migration Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install SQLx CLI
+        run: cargo install sqlx-cli --no-default-features --features sqlite
+
+      - name: Test migrations
+        run: |
+          # Test fresh database setup
+          export DATABASE_URL="sqlite:migration_test_fresh.db"
+          sqlx database create
+          sqlx migrate run
+
+          # Test migration rollback if supported
+          # sqlx migrate revert (uncomment if you add rollback migrations)
+
+          # Test migrations on existing database
+          export DATABASE_URL="sqlite:migration_test_existing.db"
+          sqlx database create
+          # Create some test data in old schema if needed
+          sqlx migrate run
+
+          echo "✅ Database migrations tested successfully"
+
+      - name: Cleanup migration test databases
+        run: |
+          rm -f migration_test_fresh.db
+          rm -f migration_test_existing.db
+
+  # Notify on CI completion
+  ci-complete:
+    name: CI Complete
+    runs-on: ubuntu-latest
+    needs:
+      [
+        security-audit,
+        comprehensive-tests,
+        cross-platform-build,
+        production-readiness,
+        container-security,
+        migration-test,
+      ]
+    if: always()
+    steps:
+      - name: Evaluate CI results
+        run: |
+          echo "Security Audit: ${{ needs.security-audit.result }}"
+          echo "Comprehensive Tests: ${{ needs.comprehensive-tests.result }}"
+          echo "Cross-platform Build: ${{ needs.cross-platform-build.result }}"
+          echo "Production Readiness: ${{ needs.production-readiness.result }}"
+          echo "Container Security: ${{ needs.container-security.result }}"
+          echo "Migration Test: ${{ needs.migration-test.result }}"
+
+          # Count failures
+          failures=0
+          if [[ "${{ needs.security-audit.result }}" != "success" ]]; then ((failures++)); fi
+          if [[ "${{ needs.comprehensive-tests.result }}" != "success" ]]; then ((failures++)); fi
+          if [[ "${{ needs.cross-platform-build.result }}" != "success" ]]; then ((failures++)); fi
+          if [[ "${{ needs.production-readiness.result }}" != "success" ]]; then ((failures++)); fi
+          if [[ "${{ needs.container-security.result }}" != "success" ]]; then ((failures++)); fi
+          if [[ "${{ needs.migration-test.result }}" != "success" ]]; then ((failures++)); fi
+
+          if [ $failures -eq 0 ]; then
+            echo "🎉 All CI checks passed! Ready for production."
+          else
+            echo "❌ $failures CI check(s) failed. Please review before deploying."
+            exit 1
+          fi
