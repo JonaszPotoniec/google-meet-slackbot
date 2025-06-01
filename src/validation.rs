@@ -146,7 +146,7 @@ impl InputValidator {
 
         let valid_chars = state
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == ':');
 
         if !valid_chars {
             bail!("OAuth state contains invalid characters");

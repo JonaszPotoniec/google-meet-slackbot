@@ -71,10 +71,7 @@ pub async fn initiate_google_oauth(
     let (auth_url, _) = client
         .authorize_url(|| csrf_token.clone())
         .add_scope(Scope::new(
-            "https://www.googleapis.com/auth/calendar".to_string(),
-        ))
-        .add_scope(Scope::new(
-            "https://www.googleapis.com/auth/calendar.events".to_string(),
+            "https://www.googleapis.com/auth/meetings.space.created".to_string(),
         ))
         .url();
 
@@ -184,7 +181,7 @@ pub async fn handle_google_callback(
                 token.access_token().secret().to_string(),
                 token.refresh_token().map(|t| t.secret().to_string()),
                 expires_at,
-                Some("https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.events".to_string()),
+                Some("https://www.googleapis.com/auth/meetings.space.created".to_string()),
             );
 
             match state.db.store_oauth_token(&oauth_token).await {

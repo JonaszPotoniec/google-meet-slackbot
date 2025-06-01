@@ -1,12 +1,12 @@
 # Slack Meet Bot
 
-A Slack bot that generates Google Meet links using the `/meet` command. The bot integrates with Google Calendar API to create calendar events with Meet links and stores meeting data in a SQLite database.
+A Slack bot that generates instant Google Meet links using the `/meet` command. The bot uses the Google Meet API to create meeting spaces, and stores meeting data in a SQLite database.
 
 ## Prerequisites
 
 - Rust (latest stable version)
 - A Slack workspace with admin privileges
-- A Google Cloud Platform project with Calendar API enabled
+- A Google Cloud Platform project with Meet API enabled
 
 ## Setup
 
@@ -31,7 +31,7 @@ sqlx migrate run
 
 1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a new project or select an existing one
-3. Enable the Google Calendar API
+3. Enable the Google Meet API
 4. Go to "Credentials" and create OAuth 2.0 Client IDs:
    - Application type: Web application
    - Authorized redirect URIs: `http://localhost:3000/auth/google/callback` (adjust for production)

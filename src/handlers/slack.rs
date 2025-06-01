@@ -354,10 +354,33 @@ async fn handle_meet_command(
             Ok(Json(SlackResponse::with_auth_prompt(auth_url)))
         }
         Err(e) => {
-            error!("Failed to get OAuth token: {}", e);
-            Ok(Json(SlackResponse::ephemeral(
-                "❌ Sorry, there was an error checking your authentication.".to_string(),
-            )))
+            let error_message = e.to_string();
+            
+            if error_message.contains("Invalid encrypted token format") 
+                || error_message.contains("Decryption failed") 
+                || error_message.contains("Encrypted token too short") {
+                
+                warn!("Token decryption failed for user {}: {}. Prompting for re-authentication.", user.id, e);
+                
+                if let Err(delete_err) = state.db.delete_oauth_token(user.id).await {
+                    warn!("Failed to delete invalid token: {}", delete_err);
+                }
+                
+                let auth_url = format!(
+                    "{}/auth/google?user_id={}",
+                    state
+                        .google_redirect_uri
+                        .trim_end_matches("/auth/google/callback"),
+                    payload.user_id
+                );
+
+                Ok(Json(SlackResponse::with_auth_prompt(auth_url)))
+            } else {
+                error!("Failed to get OAuth token: {}", e);
+                Ok(Json(SlackResponse::ephemeral(
+                    "❌ Sorry, there was an error checking your authentication.".to_string(),
+                )))
+            }
         }
     }
 }
@@ -373,7 +396,7 @@ async fn create_meet_link(
     };
 
     let meet_link =
-        crate::google::create_calendar_event_with_meet(&token.access_token, title.clone()).await?;
+        crate::google::create_meet_space(&token.access_token).await?;
 
     let meeting = crate::database::models::Meeting::new(token.user_id, meet_link.clone(), title);
 

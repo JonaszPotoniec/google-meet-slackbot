@@ -82,11 +82,9 @@ pub async fn refresh_token_if_needed(
     }
 }
 
-/// Validate that a token has the required scopes for Google Calendar/Meet
 pub fn validate_token_scopes(token: &OAuthToken) -> Result<(), OAuthError> {
     let required_scopes = [
-        "https://www.googleapis.com/auth/calendar",
-        "https://www.googleapis.com/auth/calendar.events",
+        "https://www.googleapis.com/auth/meetings.space.created",
     ];
 
     if let Some(ref scope) = token.scope {
