@@ -46,9 +46,9 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let database_url = env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "sqlite:./data/bot.db".to_string());
-    
+    let database_url =
+        env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:./data/bot.db".to_string());
+
     let db = Database::new(&database_url).await?;
     db.migrate().await?;
 
@@ -58,8 +58,7 @@ async fn main() -> anyhow::Result<()> {
         rate_limiter: rate_limiter.clone(),
         slack_signing_secret: env::var("SLACK_SIGNING_SECRET")
             .expect("SLACK_SIGNING_SECRET must be set"),
-        google_client_id: env::var("GOOGLE_CLIENT_ID")
-            .expect("GOOGLE_CLIENT_ID must be set"),
+        google_client_id: env::var("GOOGLE_CLIENT_ID").expect("GOOGLE_CLIENT_ID must be set"),
         google_client_secret: env::var("GOOGLE_CLIENT_SECRET")
             .expect("GOOGLE_CLIENT_SECRET must be set"),
         google_redirect_uri: env::var("GOOGLE_REDIRECT_URI")
@@ -70,9 +69,15 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/health", get(health_check))
-        .route("/slack/commands", post(handlers::slack::handle_slash_command))
+        .route(
+            "/slack/commands",
+            post(handlers::slack::handle_slash_command),
+        )
         .route("/auth/google", get(handlers::auth::initiate_google_oauth))
-        .route("/auth/google/callback", get(handlers::auth::handle_google_callback))
+        .route(
+            "/auth/google/callback",
+            get(handlers::auth::handle_google_callback),
+        )
         .with_state(state)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
@@ -82,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
     let addr = format!("{}:{}", host, port);
 
     info!("Starting server on {}", addr);
-    
+
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;
 

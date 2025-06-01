@@ -1,7 +1,7 @@
-use sqlx::sqlite::SqlitePool;
+use crate::crypto::TokenCrypto;
 use anyhow::Result;
 use chrono::NaiveDateTime;
-use crate::crypto::TokenCrypto;
+use sqlx::sqlite::SqlitePool;
 
 pub mod models;
 pub use models::*;
@@ -14,13 +14,15 @@ pub struct Database {
 
 impl Database {
     pub async fn new(database_url: &str) -> Result<Self> {
-        if let Some(parent) = std::path::Path::new(database_url.trim_start_matches("sqlite:")).parent() {
+        if let Some(parent) =
+            std::path::Path::new(database_url.trim_start_matches("sqlite:")).parent()
+        {
             tokio::fs::create_dir_all(parent).await?;
         }
 
         let pool = SqlitePool::connect(database_url).await?;
         let crypto = TokenCrypto::new()?;
-        
+
         Ok(Self { pool, crypto })
     }
 
@@ -128,12 +130,9 @@ impl Database {
     }
 
     pub async fn delete_oauth_token(&self, user_id: i64) -> Result<()> {
-        sqlx::query!(
-            "DELETE FROM oauth_tokens WHERE user_id = ?1",
-            user_id
-        )
-        .execute(&self.pool)
-        .await?;
+        sqlx::query!("DELETE FROM oauth_tokens WHERE user_id = ?1", user_id)
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }

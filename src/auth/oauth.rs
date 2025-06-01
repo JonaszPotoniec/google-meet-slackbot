@@ -1,8 +1,6 @@
-use oauth2::{
-    basic::BasicClient, RefreshToken, TokenResponse,
-};
 use anyhow::Result;
-use tracing::{info, error, warn};
+use oauth2::{basic::BasicClient, RefreshToken, TokenResponse};
+use tracing::{error, info, warn};
 
 use crate::database::models::OAuthToken;
 
@@ -35,9 +33,14 @@ pub async fn refresh_token_if_needed(
         return Ok(None);
     }
 
-    info!("Token expires soon, attempting refresh for user {}", token.user_id);
+    info!(
+        "Token expires soon, attempting refresh for user {}",
+        token.user_id
+    );
 
-    let refresh_token_str = token.refresh_token.as_ref()
+    let refresh_token_str = token
+        .refresh_token
+        .as_ref()
         .ok_or(OAuthError::NoRefreshToken)?;
 
     let refresh_token = RefreshToken::new(refresh_token_str.clone());
@@ -51,7 +54,8 @@ pub async fn refresh_token_if_needed(
             info!("Successfully refreshed token for user {}", token.user_id);
 
             let expires_at = token_result.expires_in().map(|duration| {
-                (chrono::Utc::now() + chrono::Duration::from_std(duration).unwrap_or_default()).naive_utc()
+                (chrono::Utc::now() + chrono::Duration::from_std(duration).unwrap_or_default())
+                    .naive_utc()
             });
 
             // Create new token with refreshed values
@@ -59,7 +63,8 @@ pub async fn refresh_token_if_needed(
                 id: token.id,
                 user_id: token.user_id,
                 access_token: token_result.access_token().secret().clone(),
-                refresh_token: token_result.refresh_token()
+                refresh_token: token_result
+                    .refresh_token()
                     .map(|rt| rt.secret().clone())
                     .or_else(|| token.refresh_token.clone()), // Keep old refresh token if new one not provided
                 expires_at,
@@ -86,14 +91,14 @@ pub fn validate_token_scopes(token: &OAuthToken) -> Result<(), OAuthError> {
 
     if let Some(ref scope) = token.scope {
         let token_scopes: Vec<&str> = scope.split_whitespace().collect();
-        
+
         for required_scope in &required_scopes {
             if !token_scopes.contains(required_scope) {
                 warn!("Token missing required scope: {}", required_scope);
                 return Err(OAuthError::InvalidToken);
             }
         }
-        
+
         Ok(())
     } else {
         warn!("Token has no scope information");

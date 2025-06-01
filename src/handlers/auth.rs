@@ -4,8 +4,8 @@ use axum::{
     response::{Html, Redirect},
 };
 use oauth2::{
-    basic::BasicClient, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
-    RedirectUrl, Scope, TokenResponse, TokenUrl,
+    basic::BasicClient, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, RedirectUrl,
+    Scope, TokenResponse, TokenUrl,
 };
 use serde::Deserialize;
 use tracing::{error, info, instrument, warn};
@@ -36,12 +36,23 @@ pub async fn initiate_google_oauth(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    if let Err(e) = state.rate_limiter.check_user_limit(&query.user_id, "/auth/google").await {
-        warn!("Rate limit exceeded for user {} on OAuth: {}", query.user_id, e);
+    if let Err(e) = state
+        .rate_limiter
+        .check_user_limit(&query.user_id, "/auth/google")
+        .await
+    {
+        warn!(
+            "Rate limit exceeded for user {} on OAuth: {}",
+            query.user_id, e
+        );
         return Err(StatusCode::TOO_MANY_REQUESTS);
     }
 
-    if let Err(e) = state.rate_limiter.check_endpoint_limit("/auth/google").await {
+    if let Err(e) = state
+        .rate_limiter
+        .check_endpoint_limit("/auth/google")
+        .await
+    {
         error!("Global rate limit exceeded for OAuth: {}", e);
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
@@ -49,8 +60,8 @@ pub async fn initiate_google_oauth(
     let client = create_oauth_client(&state)?;
 
     // Create a cryptographically secure state parameter
+    use base64::{engine::general_purpose, Engine as _};
     use rand::Rng;
-    use base64::{Engine as _, engine::general_purpose};
     let mut rng = rand::thread_rng();
     let random_bytes: [u8; 32] = rng.gen();
     let random_state = general_purpose::URL_SAFE_NO_PAD.encode(&random_bytes);
@@ -59,8 +70,12 @@ pub async fn initiate_google_oauth(
 
     let (auth_url, _) = client
         .authorize_url(|| csrf_token.clone())
-        .add_scope(Scope::new("https://www.googleapis.com/auth/calendar".to_string()))
-        .add_scope(Scope::new("https://www.googleapis.com/auth/calendar.events".to_string()))
+        .add_scope(Scope::new(
+            "https://www.googleapis.com/auth/calendar".to_string(),
+        ))
+        .add_scope(Scope::new(
+            "https://www.googleapis.com/auth/calendar.events".to_string(),
+        ))
         .url();
 
     info!("Redirecting to Google OAuth: {}", auth_url);
@@ -80,7 +95,7 @@ pub async fn handle_google_callback(
         warn!("Invalid OAuth code: {}", e);
         return Ok(Html(create_error_page("Invalid authorization code")));
     }
-    
+
     if let Err(e) = validator.validate_oauth_state(&query.state) {
         warn!("Invalid OAuth state: {}", e);
         return Ok(Html(create_error_page("Invalid authentication state")));
@@ -107,14 +122,29 @@ pub async fn handle_google_callback(
     }
 
     // Apply rate limiting
-    if let Err(e) = state.rate_limiter.check_user_limit(user_id, "/auth/google/callback").await {
-        warn!("Rate limit exceeded for user {} on OAuth callback: {}", user_id, e);
-        return Ok(Html(create_error_page("Too many authentication attempts. Please try again later.")));
+    if let Err(e) = state
+        .rate_limiter
+        .check_user_limit(user_id, "/auth/google/callback")
+        .await
+    {
+        warn!(
+            "Rate limit exceeded for user {} on OAuth callback: {}",
+            user_id, e
+        );
+        return Ok(Html(create_error_page(
+            "Too many authentication attempts. Please try again later.",
+        )));
     }
 
-    if let Err(e) = state.rate_limiter.check_endpoint_limit("/auth/google/callback").await {
+    if let Err(e) = state
+        .rate_limiter
+        .check_endpoint_limit("/auth/google/callback")
+        .await
+    {
         error!("Global rate limit exceeded for OAuth callback: {}", e);
-        return Ok(Html(create_error_page("Service temporarily unavailable. Please try again later.")));
+        return Ok(Html(create_error_page(
+            "Service temporarily unavailable. Please try again later.",
+        )));
     }
 
     info!("Processing OAuth callback for user: {}", user_id);
@@ -179,17 +209,17 @@ pub fn create_oauth_client(state: &AppState) -> Result<BasicClient, StatusCode> 
     let client = BasicClient::new(
         ClientId::new(state.google_client_id.clone()),
         Some(ClientSecret::new(state.google_client_secret.clone())),
-        AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string())
-            .map_err(|e| {
-                error!("Invalid auth URL: {}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?,
+        AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string()).map_err(|e| {
+            error!("Invalid auth URL: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?,
         Some(
-            TokenUrl::new("https://www.googleapis.com/oauth2/v4/token".to_string())
-                .map_err(|e| {
+            TokenUrl::new("https://www.googleapis.com/oauth2/v4/token".to_string()).map_err(
+                |e| {
                     error!("Invalid token URL: {}", e);
                     StatusCode::INTERNAL_SERVER_ERROR
-                })?,
+                },
+            )?,
         ),
     )
     .set_redirect_uri(

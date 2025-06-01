@@ -1,8 +1,8 @@
+use anyhow::{bail, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use anyhow::{Result, bail};
 
 #[derive(Clone)]
 pub struct RateLimiter {
@@ -40,7 +40,7 @@ impl RateLimiter {
 
     pub async fn check_user_limit(&self, user_id: &str, endpoint: &str) -> Result<()> {
         let now = Instant::now();
-        
+
         let (max_requests, window_duration) = match endpoint {
             "/slack/commands" => (10, Duration::from_secs(60)),
             "/auth/google" => (5, Duration::from_secs(300)),
@@ -49,19 +49,20 @@ impl RateLimiter {
         };
 
         let mut user_limits = self.user_limits.write().await;
-        let user_limit = user_limits.entry(user_id.to_string()).or_insert_with(|| {
-            UserRateLimit {
+        let user_limit = user_limits
+            .entry(user_id.to_string())
+            .or_insert_with(|| UserRateLimit {
                 request_count: 0,
                 window_start: now,
                 last_blocked: None,
                 backoff_duration: Duration::from_secs(1),
-            }
-        });
+            });
 
         if let Some(last_blocked) = user_limit.last_blocked {
             if now.duration_since(last_blocked) < user_limit.backoff_duration {
-                bail!("User {} is in backoff period for {} seconds", 
-                    user_id, 
+                bail!(
+                    "User {} is in backoff period for {} seconds",
+                    user_id,
                     user_limit.backoff_duration.as_secs()
                 );
             }
@@ -78,10 +79,11 @@ impl RateLimiter {
                 user_limit.backoff_duration * 2,
                 Duration::from_secs(15 * 60),
             );
-            
-            bail!("Rate limit exceeded for user {}: {} requests in {} seconds", 
-                user_id, 
-                max_requests, 
+
+            bail!(
+                "Rate limit exceeded for user {}: {} requests in {} seconds",
+                user_id,
+                max_requests,
                 window_duration.as_secs()
             );
         }
@@ -92,7 +94,7 @@ impl RateLimiter {
 
     pub async fn check_endpoint_limit(&self, endpoint: &str) -> Result<()> {
         let now = Instant::now();
-        
+
         let (max_requests, window_duration) = match endpoint {
             "/slack/commands" => (1000, Duration::from_secs(60)),
             "/auth/google" => (200, Duration::from_secs(60)),
@@ -101,12 +103,12 @@ impl RateLimiter {
         };
 
         let mut endpoint_limits = self.endpoint_limits.write().await;
-        let endpoint_limit = endpoint_limits.entry(endpoint.to_string()).or_insert_with(|| {
-            EndpointRateLimit {
+        let endpoint_limit = endpoint_limits
+            .entry(endpoint.to_string())
+            .or_insert_with(|| EndpointRateLimit {
                 request_count: 0,
                 window_start: now,
-            }
-        });
+            });
 
         if now.duration_since(endpoint_limit.window_start) >= window_duration {
             endpoint_limit.request_count = 0;
@@ -114,9 +116,10 @@ impl RateLimiter {
         }
 
         if endpoint_limit.request_count >= max_requests {
-            bail!("Global rate limit exceeded for endpoint {}: {} requests in {} seconds", 
-                endpoint, 
-                max_requests, 
+            bail!(
+                "Global rate limit exceeded for endpoint {}: {} requests in {} seconds",
+                endpoint,
+                max_requests,
                 window_duration.as_secs()
             );
         }
@@ -132,17 +135,15 @@ impl RateLimiter {
         // Clean up user limits
         {
             let mut user_limits = self.user_limits.write().await;
-            user_limits.retain(|_, limit| {
-                now.duration_since(limit.window_start) < cleanup_threshold
-            });
+            user_limits
+                .retain(|_, limit| now.duration_since(limit.window_start) < cleanup_threshold);
         }
 
         // Clean up endpoint limits
         {
             let mut endpoint_limits = self.endpoint_limits.write().await;
-            endpoint_limits.retain(|_, limit| {
-                now.duration_since(limit.window_start) < cleanup_threshold
-            });
+            endpoint_limits
+                .retain(|_, limit| now.duration_since(limit.window_start) < cleanup_threshold);
         }
     }
 }
@@ -150,7 +151,7 @@ impl RateLimiter {
 /// Background task to periodically clean up old rate limit entries
 pub async fn start_cleanup_task(rate_limiter: RateLimiter) {
     let mut interval = tokio::time::interval(Duration::from_secs(10 * 60)); // 10 minutes
-    
+
     loop {
         interval.tick().await;
         rate_limiter.cleanup_old_entries().await;
@@ -170,7 +171,10 @@ mod tests {
 
         // First few requests should pass
         for _ in 0..5 {
-            assert!(rate_limiter.check_user_limit(user_id, endpoint).await.is_ok());
+            assert!(rate_limiter
+                .check_user_limit(user_id, endpoint)
+                .await
+                .is_ok());
         }
     }
 

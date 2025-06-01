@@ -66,13 +66,13 @@ pub async fn create_calendar_event_with_meet(
     title: Option<String>,
 ) -> Result<String> {
     let client = Client::new();
-    
+
     let start_time = Utc::now();
     let end_time = start_time + Duration::hours(1);
-    
+
     let event_title = title.unwrap_or_else(|| "Meet".to_string());
     let request_id = uuid::Uuid::new_v4().to_string();
-    
+
     let event = CalendarEvent {
         summary: event_title,
         start: EventDateTime {
@@ -92,7 +92,7 @@ pub async fn create_calendar_event_with_meet(
             },
         },
     };
-    
+
     let response = client
         .post("https://www.googleapis.com/calendar/v3/calendars/primary/events")
         .header("Authorization", format!("Bearer {}", access_token))
@@ -101,14 +101,14 @@ pub async fn create_calendar_event_with_meet(
         .json(&event)
         .send()
         .await?;
-    
+
     if !response.status().is_success() {
         let error_text = response.text().await?;
         return Err(anyhow!("Failed to create calendar event: {}", error_text));
     }
-    
+
     let event_response: CalendarEventResponse = response.json().await?;
-    
+
     if let Some(conference_data) = event_response.conference_data {
         for entry_point in conference_data.entry_points {
             if entry_point.entry_point_type == "video" {
@@ -116,6 +116,6 @@ pub async fn create_calendar_event_with_meet(
             }
         }
     }
-    
+
     Ok(event_response.html_link)
 }

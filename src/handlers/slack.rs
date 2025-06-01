@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::{error, info, instrument, warn};
 
+use crate::auth::oauth::{is_token_valid, refresh_token_if_needed};
+use crate::handlers::auth::create_oauth_client;
 use crate::utils::{verify_slack_request, SlackVerificationError};
 use crate::validation::InputValidator;
-use crate::auth::oauth::{refresh_token_if_needed, is_token_valid};
-use crate::handlers::auth::create_oauth_client;
 use crate::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -114,7 +114,7 @@ pub async fn handle_slash_command(
             warn!("Missing or invalid X-Slack-Signature header");
             StatusCode::UNAUTHORIZED
         })?;
-    
+
     let timestamp = headers
         .get("x-slack-request-timestamp")
         .and_then(|v| v.to_str().ok())
@@ -142,39 +142,39 @@ pub async fn handle_slash_command(
 
     info!("Slack signature verification successful");
 
-    let payload: SlashCommandPayload = serde_urlencoded::from_str(&body)
-        .map_err(|e| {
-            error!("Failed to parse form data: {}", e);
-            StatusCode::BAD_REQUEST
-        })?;
+    let payload: SlashCommandPayload = serde_urlencoded::from_str(&body).map_err(|e| {
+        error!("Failed to parse form data: {}", e);
+        StatusCode::BAD_REQUEST
+    })?;
 
     let validator = InputValidator::new();
-    
+
     if let Err(e) = validator.validate_slack_command(&payload.command) {
         warn!("Invalid command: {}", e);
         return Ok(Json(SlackResponse::ephemeral(
             "❌ Invalid command".to_string(),
         )));
     }
-    
+
     if let Err(e) = validator.validate_slack_user_id(&payload.user_id) {
         warn!("Invalid user ID: {}", e);
         return Err(StatusCode::BAD_REQUEST);
     }
-    
+
     if let Err(e) = validator.validate_slack_team_id(&payload.team_id) {
         warn!("Invalid team ID: {}", e);
         return Err(StatusCode::BAD_REQUEST);
     }
-    
+
     if let Err(e) = validator.validate_slack_channel_id(&payload.channel_id) {
         warn!("Invalid channel ID: {}", e);
         return Err(StatusCode::BAD_REQUEST);
     }
-    
+
     if let Err(e) = validator.validate_url(&payload.response_url) {
         warn!("Invalid response URL: {}", e);
-        return Err(StatusCode::BAD_REQUEST);    }
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     if let Some(ref text) = payload.text {
         if let Err(e) = validator.validate_text_input(text, "command text") {
@@ -185,17 +185,26 @@ pub async fn handle_slash_command(
         }
     }
 
-    if let Err(e) = state.rate_limiter.check_user_limit(&payload.user_id, "/slack/commands").await {
+    if let Err(e) = state
+        .rate_limiter
+        .check_user_limit(&payload.user_id, "/slack/commands")
+        .await
+    {
         warn!("Rate limit exceeded for user {}: {}", payload.user_id, e);
         return Ok(Json(SlackResponse::ephemeral(
             "⏱️ Please slow down! You're sending commands too quickly.".to_string(),
         )));
     }
 
-    if let Err(e) = state.rate_limiter.check_endpoint_limit("/slack/commands").await {
+    if let Err(e) = state
+        .rate_limiter
+        .check_endpoint_limit("/slack/commands")
+        .await
+    {
         error!("Global rate limit exceeded: {}", e);
         return Ok(Json(SlackResponse::ephemeral(
-            "🚫 Service temporarily unavailable due to high load. Please try again later.".to_string(),
+            "🚫 Service temporarily unavailable due to high load. Please try again later."
+                .to_string(),
         )));
     }
 
@@ -219,11 +228,7 @@ async fn handle_meet_command(
 ) -> Result<Json<SlackResponse>, StatusCode> {
     info!("Handling /meet command for user: {}", payload.user_id);
 
-    let user = match state
-        .db
-        .get_user_by_slack_id(&payload.user_id)
-        .await
-    {
+    let user = match state.db.get_user_by_slack_id(&payload.user_id).await {
         Ok(Some(user)) => user,
         Ok(None) => {
             match state
@@ -251,8 +256,11 @@ async fn handle_meet_command(
     match state.db.get_oauth_token(user.id).await {
         Ok(Some(mut token)) => {
             if token.is_expired() || token.expires_soon() {
-                info!("Token expired or expiring soon for user {}, attempting refresh", user.id);
-                
+                info!(
+                    "Token expired or expiring soon for user {}, attempting refresh",
+                    user.id
+                );
+
                 let client = match create_oauth_client(&state) {
                     Ok(client) => client,
                     Err(_) => {
@@ -266,39 +274,46 @@ async fn handle_meet_command(
                 match refresh_token_if_needed(&client, &token).await {
                     Ok(Some(refreshed_token)) => {
                         info!("Successfully refreshed token for user {}", user.id);
-                        
+
                         if let Err(e) = state.db.store_oauth_token(&refreshed_token).await {
                             error!("Failed to store refreshed token: {}", e);
                             return Ok(Json(SlackResponse::ephemeral(
-                                "❌ Failed to update authentication. Please re-authenticate.".to_string(),
+                                "❌ Failed to update authentication. Please re-authenticate."
+                                    .to_string(),
                             )));
                         }
-                        
+
                         token = refreshed_token;
                     }
-                    Ok(None) => {
-                    }
+                    Ok(None) => {}
                     Err(e) => {
                         warn!("Failed to refresh token for user {}: {}", user.id, e);
                         let auth_url = format!(
                             "{}/auth/google?user_id={}",
-                            state.google_redirect_uri.trim_end_matches("/auth/google/callback"),
+                            state
+                                .google_redirect_uri
+                                .trim_end_matches("/auth/google/callback"),
                             payload.user_id
                         );
-                        
+
                         return Ok(Json(SlackResponse::with_auth_prompt(auth_url)));
                     }
                 }
             }
 
             if !is_token_valid(&token) {
-                warn!("Token invalid or missing required scopes for user {}", user.id);
+                warn!(
+                    "Token invalid or missing required scopes for user {}",
+                    user.id
+                );
                 let auth_url = format!(
                     "{}/auth/google?user_id={}",
-                    state.google_redirect_uri.trim_end_matches("/auth/google/callback"),
+                    state
+                        .google_redirect_uri
+                        .trim_end_matches("/auth/google/callback"),
                     payload.user_id
                 );
-                
+
                 return Ok(Json(SlackResponse::with_auth_prompt(auth_url)));
             }
 
@@ -309,7 +324,7 @@ async fn handle_meet_command(
                         meet_link.clone(),
                         payload.text.clone(),
                     );
-                    
+
                     if let Err(e) = state.db.create_meeting(&meeting).await {
                         error!("Failed to store meeting: {}", e);
                     }
@@ -330,10 +345,12 @@ async fn handle_meet_command(
         Ok(None) => {
             let auth_url = format!(
                 "{}/auth/google?user_id={}",
-                state.google_redirect_uri.trim_end_matches("/auth/google/callback"),
+                state
+                    .google_redirect_uri
+                    .trim_end_matches("/auth/google/callback"),
                 payload.user_id
             );
-            
+
             Ok(Json(SlackResponse::with_auth_prompt(auth_url)))
         }
         Err(e) => {
@@ -354,19 +371,13 @@ async fn create_meet_link(
         Some(text) if !text.trim().is_empty() => Some(text.trim().to_string()),
         _ => None,
     };
-    
-    let meet_link = crate::google::create_calendar_event_with_meet(
-        &token.access_token,
-        title.clone(),
-    ).await?;
-    
-    let meeting = crate::database::models::Meeting::new(
-        token.user_id,
-        meet_link.clone(),
-        title,
-    );
-    
+
+    let meet_link =
+        crate::google::create_calendar_event_with_meet(&token.access_token, title.clone()).await?;
+
+    let meeting = crate::database::models::Meeting::new(token.user_id, meet_link.clone(), title);
+
     state.db.create_meeting(&meeting).await?;
-    
+
     Ok(meet_link)
 }

@@ -1,5 +1,5 @@
+use anyhow::{bail, Result};
 use regex::Regex;
-use anyhow::{Result, bail};
 use std::collections::HashSet;
 
 pub struct InputValidator {
@@ -36,11 +36,11 @@ impl InputValidator {
         if user_id.is_empty() {
             bail!("User ID cannot be empty");
         }
-        
+
         if !self.slack_user_id_regex.is_match(user_id) {
             bail!("Invalid Slack user ID format: {}", user_id);
         }
-        
+
         Ok(())
     }
 
@@ -48,11 +48,11 @@ impl InputValidator {
         if team_id.is_empty() {
             bail!("Team ID cannot be empty");
         }
-        
+
         if !self.slack_team_id_regex.is_match(team_id) {
             bail!("Invalid Slack team ID format: {}", team_id);
         }
-        
+
         Ok(())
     }
 
@@ -60,36 +60,59 @@ impl InputValidator {
         if channel_id.is_empty() {
             bail!("Channel ID cannot be empty");
         }
-        
+
         if !self.slack_channel_id_regex.is_match(channel_id) {
             bail!("Invalid Slack channel ID format: {}", channel_id);
         }
-        
+
         Ok(())
     }
 
     pub fn validate_text_input(&self, text: &str, field_name: &str) -> Result<String> {
         if text.len() > self.max_text_length {
-            bail!("{} exceeds maximum length of {} characters", field_name, self.max_text_length);
+            bail!(
+                "{} exceeds maximum length of {} characters",
+                field_name,
+                self.max_text_length
+            );
         }
 
         let sanitized = text
             .chars()
-            .filter(|c| c.is_ascii_alphanumeric() || " .,!?-_@#$%^&*()[]{}+=:;\"'<>/\\|`~".contains(*c))
+            .filter(|c| {
+                c.is_ascii_alphanumeric() || " .,!?-_@#$%^&*()[]{}+=:;\"'<>/\\|`~".contains(*c)
+            })
             .collect::<String>();
 
         let lowercase = sanitized.to_lowercase();
         let dangerous_patterns = [
-            "javascript:", "data:", "vbscript:", "<script", "</script",
-            "onload=", "onerror=", "onclick=", "onmouseover=",
-            "eval(", "document.cookie", "window.location",
-            "alert(", "confirm(", "prompt(",
-            "document.write", "innerHTML", "outerHTML"
+            "javascript:",
+            "data:",
+            "vbscript:",
+            "<script",
+            "</script",
+            "onload=",
+            "onerror=",
+            "onclick=",
+            "onmouseover=",
+            "eval(",
+            "document.cookie",
+            "window.location",
+            "alert(",
+            "confirm(",
+            "prompt(",
+            "document.write",
+            "innerHTML",
+            "outerHTML",
         ];
 
         for pattern in &dangerous_patterns {
             if lowercase.contains(pattern) {
-                bail!("{} contains potentially dangerous content: {}", field_name, pattern);
+                bail!(
+                    "{} contains potentially dangerous content: {}",
+                    field_name,
+                    pattern
+                );
             }
         }
 
@@ -121,9 +144,9 @@ impl InputValidator {
             bail!("OAuth state too long (maximum 128 characters)");
         }
 
-        let valid_chars = state.chars().all(|c| {
-            c.is_ascii_alphanumeric() || c == '-' || c == '_'
-        });
+        let valid_chars = state
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
 
         if !valid_chars {
             bail!("OAuth state contains invalid characters");
@@ -141,9 +164,9 @@ impl InputValidator {
             bail!("OAuth code has invalid length");
         }
 
-        let valid_chars = code.chars().all(|c| {
-            c.is_ascii_alphanumeric() || "._-/".contains(c)
-        });
+        let valid_chars = code
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._-/".contains(c));
 
         if !valid_chars {
             bail!("OAuth code contains invalid characters");
@@ -192,11 +215,11 @@ mod tests {
     #[test]
     fn test_validate_slack_user_id() {
         let validator = InputValidator::new();
-        
+
         // Valid user IDs
         assert!(validator.validate_slack_user_id("U1234567890").is_ok());
         assert!(validator.validate_slack_user_id("UABCDEFGHIJ").is_ok());
-        
+
         // Invalid user IDs
         assert!(validator.validate_slack_user_id("").is_err());
         assert!(validator.validate_slack_user_id("invalid").is_err());
@@ -206,14 +229,20 @@ mod tests {
     #[test]
     fn test_validate_text_input() {
         let validator = InputValidator::new();
-        
+
         // Valid input
-        assert!(validator.validate_text_input("Hello world!", "test").is_ok());
-        
+        assert!(validator
+            .validate_text_input("Hello world!", "test")
+            .is_ok());
+
         // XSS attempts
-        assert!(validator.validate_text_input("<script>alert('xss')</script>", "test").is_err());
-        assert!(validator.validate_text_input("javascript:alert(1)", "test").is_err());
-        
+        assert!(validator
+            .validate_text_input("<script>alert('xss')</script>", "test")
+            .is_err());
+        assert!(validator
+            .validate_text_input("javascript:alert(1)", "test")
+            .is_err());
+
         // Too long
         let long_text = "a".repeat(3000);
         assert!(validator.validate_text_input(&long_text, "test").is_err());
@@ -222,14 +251,18 @@ mod tests {
     #[test]
     fn test_validate_oauth_state() {
         let validator = InputValidator::new();
-        
+
         // Valid state
-        assert!(validator.validate_oauth_state("abcdef1234567890abcdef1234567890ab").is_ok());
-        
+        assert!(validator
+            .validate_oauth_state("abcdef1234567890abcdef1234567890ab")
+            .is_ok());
+
         // Too short
         assert!(validator.validate_oauth_state("short").is_err());
-        
+
         // Invalid characters
-        assert!(validator.validate_oauth_state("invalid+chars/here=").is_err());
+        assert!(validator
+            .validate_oauth_state("invalid+chars/here=")
+            .is_err());
     }
 }
